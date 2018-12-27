@@ -1,53 +1,68 @@
 resource "aws_autoscaling_group" "workers" {
-  name_prefix           = "${aws_eks_cluster.this.name}-${lookup(var.worker_groups[count.index], "name", count.index)}"
-  desired_capacity      = "${lookup(var.worker_groups[count.index], "asg_desired_capacity", local.workers_group_defaults["asg_desired_capacity"])}"
-  max_size              = "${lookup(var.worker_groups[count.index], "asg_max_size", local.workers_group_defaults["asg_max_size"])}"
-  min_size              = "${lookup(var.worker_groups[count.index], "asg_min_size", local.workers_group_defaults["asg_min_size"])}"
-  target_group_arns     = ["${compact(split(",", coalesce(lookup(var.worker_groups[count.index], "target_group_arns", ""), local.workers_group_defaults["target_group_arns"])))}"]
-  launch_configuration  = "${element(aws_launch_configuration.workers.*.id, count.index)}"
-  vpc_zone_identifier   = ["${split(",", coalesce(lookup(var.worker_groups[count.index], "subnets", ""), local.workers_group_defaults["subnets"]))}"]
-  protect_from_scale_in = "${lookup(var.worker_groups[count.index], "protect_from_scale_in", local.workers_group_defaults["protect_from_scale_in"])}"
-  suspended_processes   = ["${compact(split(",", coalesce(lookup(var.worker_groups[count.index], "suspended_processes", ""), local.workers_group_defaults["suspended_processes"])))}"]
-  count                 = "${var.worker_group_count}"
+  name_prefix          = "${aws_eks_cluster.this.name}-${lookup(var.worker_groups[count.index], "name", count.index)}"
+  desired_capacity     = "${lookup(var.worker_groups[count.index], "asg_desired_capacity", lookup(var.workers_group_defaults, "asg_desired_capacity"))}"
+  max_size             = "${lookup(var.worker_groups[count.index], "asg_max_size",lookup(var.workers_group_defaults, "asg_max_size"))}"
+  min_size             = "${lookup(var.worker_groups[count.index], "asg_min_size",lookup(var.workers_group_defaults, "asg_min_size"))}"
+  min_elb_capacity     = "${lookup(var.worker_groups[count.index], "asg_min_size",lookup(var.workers_group_defaults, "asg_min_size"))}"
+  launch_configuration = "${element(aws_launch_configuration.workers.*.id, count.index)}"
+  vpc_zone_identifier  = ["${split(",", coalesce(lookup(var.worker_groups[count.index], "subnets", ""), join(",", var.subnets)))}"]
+  enabled_metrics      = ["GroupMinSize", "GroupMaxSize", "GroupDesiredCapacity", "GroupInServiceInstances", "GroupPendingInstances", "GroupStandbyInstances", "GroupTerminatingInstances", "GroupTotalInstances"]
+  count                = "${length(var.worker_groups)}"
 
   tags = ["${concat(
     list(
       map("key", "Name", "value", "${aws_eks_cluster.this.name}-${lookup(var.worker_groups[count.index], "name", count.index)}-eks_asg", "propagate_at_launch", true),
       map("key", "kubernetes.io/cluster/${aws_eks_cluster.this.name}", "value", "owned", "propagate_at_launch", true),
-      map("key", "k8s.io/cluster-autoscaler/${lookup(var.worker_groups[count.index], "autoscaling_enabled", local.workers_group_defaults["autoscaling_enabled"]) == 1 ? "enabled" : "disabled"  }", "value", "true", "propagate_at_launch", false)
     ),
     local.asg_tags)
   }"]
 
   lifecycle {
     ignore_changes = ["desired_capacity"]
+    create_before_destroy = true
   }
 }
 
 resource "aws_launch_configuration" "workers" {
   name_prefix                 = "${aws_eks_cluster.this.name}-${lookup(var.worker_groups[count.index], "name", count.index)}"
-  associate_public_ip_address = "${lookup(var.worker_groups[count.index], "public_ip", local.workers_group_defaults["public_ip"])}"
-  security_groups             = ["${local.worker_security_group_id}", "${var.worker_additional_security_group_ids}", "${compact(split(",",lookup(var.worker_groups[count.index],"additional_security_group_ids", local.workers_group_defaults["additional_security_group_ids"])))}"]
-  iam_instance_profile        = "${element(aws_iam_instance_profile.workers.*.id, count.index)}"
-  image_id                    = "${lookup(var.worker_groups[count.index], "ami_id", local.workers_group_defaults["ami_id"])}"
-  instance_type               = "${lookup(var.worker_groups[count.index], "instance_type", local.workers_group_defaults["instance_type"])}"
-  key_name                    = "${lookup(var.worker_groups[count.index], "key_name", local.workers_group_defaults["key_name"])}"
+  associate_public_ip_address = "${lookup(var.worker_groups[count.index], "public_ip", lookup(var.workers_group_defaults, "public_ip"))}"
+  security_groups             = ["${concat(list(local.worker_security_group_id), var.worker_additional_security_group_ids)}"]
+  iam_instance_profile        = "${aws_iam_instance_profile.workers.id}"
+  image_id                    = "${lookup(var.worker_groups[count.index], "ami_id", data.aws_ami.eks_worker.id)}"
+  instance_type               = "${lookup(var.worker_groups[count.index], "instance_type", lookup(var.workers_group_defaults, "instance_type"))}"
+  key_name                    = "${lookup(var.worker_groups[count.index], "key_name", lookup(var.workers_group_defaults, "key_name"))}"
   user_data_base64            = "${base64encode(element(data.template_file.userdata.*.rendered, count.index))}"
-  ebs_optimized               = "${lookup(var.worker_groups[count.index], "ebs_optimized", lookup(local.ebs_optimized, lookup(var.worker_groups[count.index], "instance_type", local.workers_group_defaults["instance_type"]), false))}"
-  enable_monitoring           = "${lookup(var.worker_groups[count.index], "enable_monitoring", local.workers_group_defaults["enable_monitoring"])}"
-  spot_price                  = "${lookup(var.worker_groups[count.index], "spot_price", local.workers_group_defaults["spot_price"])}"
-  placement_tenancy           = "${lookup(var.worker_groups[count.index], "placement_tenancy", local.workers_group_defaults["placement_tenancy"])}"
-  count                       = "${var.worker_group_count}"
+  ebs_optimized               = "${lookup(var.worker_groups[count.index], "ebs_optimized", lookup(local.ebs_optimized, lookup(var.worker_groups[count.index], "instance_type", lookup(var.workers_group_defaults, "instance_type")), false))}"
+  count                       = "${length(var.worker_groups)}"
 
   lifecycle {
     create_before_destroy = true
   }
 
   root_block_device {
-    volume_size           = "${lookup(var.worker_groups[count.index], "root_volume_size", local.workers_group_defaults["root_volume_size"])}"
-    volume_type           = "${lookup(var.worker_groups[count.index], "root_volume_type", local.workers_group_defaults["root_volume_type"])}"
-    iops                  = "${lookup(var.worker_groups[count.index], "root_iops", local.workers_group_defaults["root_iops"])}"
+    volume_size           = "${lookup(var.worker_groups[count.index], "root_volume_size", lookup(var.workers_group_defaults, "root_volume_size"))}"
+    volume_type           = "${lookup(var.worker_groups[count.index], "root_volume_type", lookup(var.workers_group_defaults, "root_volume_type"))}"
+    iops                  = "${lookup(var.worker_groups[count.index], "root_iops", lookup(var.workers_group_defaults, "root_iops"))}"
     delete_on_termination = true
+  }
+}
+
+resource "aws_autoscaling_policy" "workers-cpu" {
+  count                  = "${length(var.worker_groups)}"
+  name                   = "${aws_eks_cluster.this.name}-${lookup(var.worker_groups[count.index], "name", count.index)}-scaling-policy-wg-${count.index}"
+  autoscaling_group_name = "${aws_autoscaling_group.workers.*.name[count.index]}"
+  policy_type            = "TargetTrackingScaling"
+  estimated_instance_warmup = 60
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = 40.0
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -105,19 +120,27 @@ resource "aws_security_group_rule" "workers_ingress_cluster_https" {
 }
 
 resource "aws_iam_role" "workers" {
-  name_prefix           = "${aws_eks_cluster.this.name}"
-  assume_role_policy    = "${data.aws_iam_policy_document.workers_assume_role_policy.json}"
-  force_detach_policies = true
+  name_prefix        = "${aws_eks_cluster.this.name}"
+  assume_role_policy = "${data.aws_iam_policy_document.workers_assume_role_policy.json}"
 }
 
 resource "aws_iam_instance_profile" "workers" {
   name_prefix = "${aws_eks_cluster.this.name}"
-  role        = "${lookup(var.worker_groups[count.index], "iam_role_id",  lookup(local.workers_group_defaults, "iam_role_id"))}"
-  count       = "${var.worker_group_count}"
+  role        = "${aws_iam_role.workers.name}"
 }
 
 resource "aws_iam_role_policy_attachment" "workers_AmazonEKSWorkerNodePolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = "${aws_iam_role.workers.name}"
+}
+
+resource "aws_iam_role_policy_attachment" "workers_CloudwatchPutMetric" {
+  policy_arn = "arn:aws:iam::140222353192:policy/cloudwatch-putmetric"
+  role       = "${aws_iam_role.workers.name}"
+}
+
+resource "aws_iam_role_policy_attachment" "workers_AmazonElasticFileSystemReadOnlyAccess" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonElasticFileSystemReadOnlyAccess"
   role       = "${aws_iam_role.workers.name}"
 }
 
@@ -134,62 +157,9 @@ resource "aws_iam_role_policy_attachment" "workers_AmazonEC2ContainerRegistryRea
 resource "null_resource" "tags_as_list_of_maps" {
   count = "${length(keys(var.tags))}"
 
-  triggers = {
-    key                 = "${element(keys(var.tags), count.index)}"
-    value               = "${element(values(var.tags), count.index)}"
-    propagate_at_launch = "true"
-  }
-}
-
-resource "aws_iam_role_policy_attachment" "workers_autoscaling" {
-  policy_arn = "${aws_iam_policy.worker_autoscaling.arn}"
-  role       = "${aws_iam_role.workers.name}"
-}
-
-resource "aws_iam_policy" "worker_autoscaling" {
-  name_prefix = "eks-worker-autoscaling-${aws_eks_cluster.this.name}"
-  description = "EKS worker node autoscaling policy for cluster ${aws_eks_cluster.this.name}"
-  policy      = "${data.aws_iam_policy_document.worker_autoscaling.json}"
-}
-
-data "aws_iam_policy_document" "worker_autoscaling" {
-  statement {
-    sid    = "eksWorkerAutoscalingAll"
-    effect = "Allow"
-
-    actions = [
-      "autoscaling:DescribeAutoScalingGroups",
-      "autoscaling:DescribeAutoScalingInstances",
-      "autoscaling:DescribeLaunchConfigurations",
-      "autoscaling:DescribeTags",
-      "autoscaling:GetAsgForInstance",
-    ]
-
-    resources = ["*"]
-  }
-
-  statement {
-    sid    = "eksWorkerAutoscalingOwn"
-    effect = "Allow"
-
-    actions = [
-      "autoscaling:SetDesiredCapacity",
-      "autoscaling:TerminateInstanceInAutoScalingGroup",
-      "autoscaling:UpdateAutoScalingGroup",
-    ]
-
-    resources = ["*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "autoscaling:ResourceTag/kubernetes.io/cluster/${aws_eks_cluster.this.name}"
-      values   = ["owned"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled"
-      values   = ["true"]
-    }
-  }
+  triggers = "${map(
+    "key", "${element(keys(var.tags), count.index)}",
+    "value", "${element(values(var.tags), count.index)}",
+    "propagate_at_launch", "true"
+  )}"
 }

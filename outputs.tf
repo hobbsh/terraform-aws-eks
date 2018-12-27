@@ -44,22 +44,17 @@ output "workers_asg_arns" {
   value       = "${aws_autoscaling_group.workers.*.arn}"
 }
 
-output "workers_asg_names" {
-  description = "Names of the autoscaling groups containing workers."
-  value       = "${aws_autoscaling_group.workers.*.id}"
-}
-
 output "worker_security_group_id" {
   description = "Security group ID attached to the EKS workers."
   value       = "${local.worker_security_group_id}"
 }
 
 output "worker_iam_role_name" {
-  description = "default IAM role name for EKS worker groups"
+  description = "IAM role name attached to EKS workers"
   value       = "${aws_iam_role.workers.name}"
 }
 
 output "worker_iam_role_arn" {
-  description = "default IAM role ARN for EKS worker groups"
+  description = "IAM role ID attached to EKS workers"
   value       = "${aws_iam_role.workers.arn}"
 }

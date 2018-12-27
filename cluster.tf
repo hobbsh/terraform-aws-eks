@@ -8,11 +8,6 @@ resource "aws_eks_cluster" "this" {
     subnet_ids         = ["${var.subnets}"]
   }
 
-  timeouts {
-    create = "${var.cluster_create_timeout}"
-    delete = "${var.cluster_delete_timeout}"
-  }
-
   depends_on = [
     "aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy",
     "aws_iam_role_policy_attachment.cluster_AmazonEKSServicePolicy",
@@ -49,10 +44,20 @@ resource "aws_security_group_rule" "cluster_https_worker_ingress" {
   count                    = "${var.cluster_create_security_group ? 1 : 0}"
 }
 
+#resource "aws_security_group_rule" "cluster_https_cidr_ingress" {
+#  cidr_blocks       = ["${local.workstation_cidr}"]
+#  description       = "Allow kubectl communication with the EKS cluster API."
+#  protocol          = "tcp"
+#  security_group_id = "${aws_security_group.cluster.id}"
+#  from_port         = 443
+#  to_port           = 443
+#  type              = "ingress"
+#  count             = "${var.cluster_security_group_id == "" ? 1 : 0}"
+#}
+
 resource "aws_iam_role" "cluster" {
-  name_prefix           = "${var.cluster_name}"
-  assume_role_policy    = "${data.aws_iam_policy_document.cluster_assume_role_policy.json}"
-  force_detach_policies = true
+  name_prefix        = "${var.cluster_name}"
+  assume_role_policy = "${data.aws_iam_policy_document.cluster_assume_role_policy.json}"
 }
 
 resource "aws_iam_role_policy_attachment" "cluster_AmazonEKSClusterPolicy" {
